@@ -23,7 +23,7 @@ class ClassificationDataset:
         self.target=data['target']
         self.data=data.drop('target',axis=1)
         self.data_test=testdata
-        self.description="A dataset class, to keep track of shit"
+        self.description="A dataset class, to streamline the fitting process"
         self.author="Shawn Roberts"
         self.models={}
         self.moddescriptions={"RF" : "Random Forest Classifier"
