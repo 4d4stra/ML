@@ -104,11 +104,12 @@ class ClassificationDataset:
             print "already split!"
 
     #initialize a model with a custom name
-    def init_model(self,strdict,thresh=0.5):
+    def init_model(self,strdict,metric,thresh=0.5):
         modstring=strdict.keys()[0]
         if modstring not in self.models.keys():
             self.models[modstring]\
                 =ClassificationModel(self.moddict[strdict[modstring]]
+                                     ,metric
                                      ,thresh=thresh)
         else:
             print "model already exists!"
@@ -119,22 +120,22 @@ class ClassificationDataset:
         if self.split is False:
             self.separate()
         if modstring not in self.models.keys():
-            self.models[modstring]=ClassificationModel(self.moddict[modstring]
-                                                       ,thresh=thresh)
-        if mini is False:
-            self.models[modstring].fit(self.x_train
-                                       ,self.y_train
-                                       ,params=params
-                                       ,testflag=True)
-        elif self.miniflag is True:
-            self.models[modstring].fit(self.x_train_mini
-                                       ,self.y_train_mini
-                                       ,params=params
-                                       ,testflag=True)
+            print "must initialize model first!"
         else:
-            print "test size too large to do mini test"
-        self.models[modstring].predict(self.x_test
-                                       ,self.y_test)           
+            if mini is False:
+                self.models[modstring].fit(self.x_train
+                                           ,self.y_train
+                                           ,params=params
+                                           ,testflag=True)
+            elif self.miniflag is True:
+                self.models[modstring].fit(self.x_train_mini
+                                           ,self.y_train_mini
+                                           ,params=params
+                                           ,testflag=True)
+            else:
+                print "test size too large to do mini test"
+            self.models[modstring].predict(self.x_test
+                                           ,self.y_test)           
 
 
     #train on the full dataset
@@ -142,8 +143,7 @@ class ClassificationDataset:
         if modstring in self.models.keys():
             self.models[modstring].fit(self.data
                                        ,self.target
-                                       ,testflag=False
-                                       ,metric=metric)
+                                       ,testflag=False)
             return self.models[modstring].predict(self.data_test) 
         else:
             "Error: model has not been tested yet!"
@@ -158,11 +158,8 @@ class ClassificationDataset:
         self.models.pop(modstr,None)
 
     #get model scores
-    def get_model_scores(self,model):
-        return {'logloss' : self.models[model].best_logloss['score']
-                ,'accuracy' : self.models[model].best_accuracy['score']
-                ,'positivelr' : self.models[model].best_positivelr['score']
-                ,'negativelr' : self.models[model].best_negativelr['score']}
+    def get_model_score(self,model):
+        return {self.models[model].metric : self.models[model].best['score']}
 
     #get all models that have been run
     def get_models(self):
@@ -172,14 +169,8 @@ class ClassificationDataset:
     def get_metric_scores(self,metric):
         return_dict={}
         for key in self.models.keys():
-            if metric is 'logloss':
-                return_dict[key]=self.models[key].best_logloss['score']
-            elif metric is 'accuracy':
-                return_dict[key]=self.models[key].best_accuracy['score']
-            elif metric is 'positivelr':
-                return_dict[key]=self.models[key].best_positivelr['score']
-            elif metric is 'negativelr':
-                return_dict[key]=self.models[key].best_negativelr['score']
+            if metric is self.models[key].metric:
+                return_dict[key]=self.models[key].best['score']
         return return_dict
     
     #get the best model given the score you want to optimize on
@@ -191,40 +182,26 @@ class ClassificationDataset:
             if best_mod is None:
                 best_mod=key
                 best_score=scoredict[key]
-            elif ((metric is 'logloss') or (metric is 'negativelr')) and scoredict[key]<best_score:
-                best_mod=key
-                best_score=scoredict[key]
-            elif ((metric is 'accuracy') or (metric is 'positivelr')) and scoredict[key]>best_score:
+            elif (scoredict[key]-best_score)\
+            *self.models[key].metricdict[self.models[key].metric]['incflag']>0:
                 best_mod=key
                 best_score=scoredict[key]
         return best_mod
 
     #getting all true positives predictions
-    def get_ones(self,model,metric=None):
-        if metric is None or metric is 'current':#use current
+    def get_ones(self,model,current=False):
+        if current is True:#use current
             return self.models[model].current['predictions'][np.array(self.y_test)==1]
-        elif metric is 'logloss':
-            return self.models[model].best_logloss['predictions'][np.array(self.y_test)==1]
-        elif metric is 'accuracy':
-            return self.models[model].best_accuracy['predictions'][np.array(self.y_test)==1]
-        elif metric is 'positivelr':
-            return self.models[model].best_positivelr['predictions'][np.array(self.y_test)==1]
-        elif metric is 'negativelr':
-            return self.models[model].best_negativelr['predictions'][np.array(self.y_test)==1]
+        else:
+            return self.models[model].best['predictions'][np.array(self.y_test)==1]
 
         
     #getting all genuine negatives predictions
-    def get_zeros(self,model,metric=None):
-        if metric is None or metric is 'current':#use current
+    def get_zeros(self,model,current=False):
+        if current is True:#use current
             return self.models[model].current['predictions'][np.array(self.y_test)==0]
-        elif metric is 'logloss':
-            return self.models[model].best_logloss['predictions'][np.array(self.y_test)==0]
-        elif metric is 'accuracy':
-            return self.models[model].best_accuracy['predictions'][np.array(self.y_test)==0]
-        elif metric is 'positivelr':
-            return self.models[model].best_positivelr['predictions'][np.array(self.y_test)==0]
-        elif metric is 'negativelr':
-            return self.models[model].best_negativelr['predictions'][np.array(self.y_test)==0]
+        else:
+            return self.models[model].best['predictions'][np.array(self.y_test)==0]
 
     
     #ensemble method# fit the optimal combination of each model
@@ -233,8 +210,8 @@ class ClassificationDataset:
         weights=np.ones(np.shape(stacked_preds))
         counter=0
         for key in self.models.keys():
-            stacked_preds[counter]=self.models[key].best_logloss['predictions']
-            weights[counter]=self.models[key].best_logloss['score']
+            stacked_preds[counter]=self.models[key].best['predictions']
+            weights[counter]=self.models[key].best['score']
             counter+=1
         weights=np.exp(-weights)
         if method is None or method is 'average':#averaging
@@ -242,24 +219,6 @@ class ClassificationDataset:
         elif method is "weighted_average":
             return logloss(np.array(self.y_test)
                            ,np.average(stacked_preds,axis=0,weights=weights))
-        elif method is 'max_confidence':#taking the maximally confident prediction
-            max_conf=np.amax(np.absolute(stacked_preds-0.5),axis=0)
-            max_conf_pred=np.zeros(len(max_conf))
-            for i in range(len(max_conf)):
-                if type(stacked_preds[:,i][np.absolute(stacked_preds[:,i]-0.5)==max_conf[i]]) is float:
-                    max_conf_pred[i]=stacked_preds[:,i][np.absolute(stacked_preds[:,i]-0.5)==max_conf[i]]
-                else:
-                    max_conf_pred[i]=stacked_preds[:,i][np.absolute(stacked_preds[:,i]-0.5)==max_conf[i]][0]
-            return logloss(np.array(self.y_test),max_conf_pred)
-        elif method is 'min_confidence':#taking the maximally confident prediction
-            min_conf=np.amin(np.absolute(stacked_preds-0.5),axis=0)
-            min_conf_pred=np.zeros(len(min_conf))
-            for i in range(len(min_conf)):
-                if type(stacked_preds[:,i][np.absolute(stacked_preds[:,i]-0.5)==min_conf[i]]) is float:
-                    min_conf_pred[i]=stacked_preds[:,i][np.absolute(stacked_preds[:,i]-0.5)==min_conf[i]]
-                else:
-                    min_conf_pred[i]=stacked_preds[:,i][np.absolute(stacked_preds[:,i]-0.5)==min_conf[i]][0]
-            return logloss(np.array(self.y_test),min_conf_pred)
         elif method is 'voted_average':#vote and then average
             votebool=stacked_preds>0.5
             votefrac=np.sum(votebool,axis=0)/float(len(weights))
@@ -369,13 +328,13 @@ class ClassificationDataset:
 
 
     #add the model as an input; prediction with separate models and K-fold CV
-    def model_as_input(self,modstring,metric):
+    def model_as_input(self,modstring):
         #modelled predictions for withheld test set
         cv_preds=np.zeros(len(self.data))
         #splitting in 3 fold set
         folds=KFold(len(self.data))
         #getting model parameters
-        params=self.models[modstring].bpars[metric]
+        params=self.models[modstring].best['params']
         #iterating through splits and predicting
         for train_index,test_index in folds:
             self.models[modstring].fit(self.data.iloc[train_index]
@@ -388,9 +347,9 @@ class ClassificationDataset:
         self.flush()
 
     #scatterplot of ones and zeros
-    def scatterplot(self,mod1,mod2):
-        plt.plot(self.get_ones(mod1,'logloss'),self.get_ones(mod2,'logloss'),'.',label='1')
-        plt.plot(self.get_zeros(mod1,'logloss'),self.get_zeros(mod2,'logloss'),'.',label='0')
+    def scatterplot(self,mod1,mod2,cur1=False,cur2=False):
+        plt.plot(self.get_ones(mod1,current=cur1),self.get_ones(mod2,current=cur2),'.',label='1')
+        plt.plot(self.get_zeros(mod1,current=cur1),self.get_zeros(mod2,current=cur2),'.',label='0')
         plt.plot(np.arange(11)/10.,np.arange(11)/10.)
         plt.legend()
         plt.show()
