@@ -19,10 +19,18 @@ class ClassificationDataset:
         self.y_test=None
         self.x_train=None
         self.x_test=None
-        self.miniflag=False
         self.preprocessing=preprocessing
-        self.target=data['target']
-        self.data=data.drop('target',axis=1)
+        if type(data) is list:
+            self.data=list()
+            for i in range(data):
+                if i is 0:
+                    self.target=data[0]['target']
+                try:
+                    data[i]=data.drop('target',axis=1)
+                self.data.append(data[i])
+        else:
+            self.target=data['target']
+            self.data=data.drop('target',axis=1)
         self.data_test=testdata
         self.description="A dataset class, to streamline the fitting process"
         self.author="Shawn Roberts"
@@ -101,50 +109,34 @@ class ClassificationDataset:
                                    , self.data
                                    , test_size=test_size
                                    , random_state=random_state)
-            if test_size<=0.4:
-                self.y_train_mini, self.y_valid, self.x_train_mini, self.x_valid\
-                    = train_test_split(self.y_train
-                                       , self.x_train
-                                       , test_size=test_size/(1.-test_size)
-                                       , random_state=random_state+1)
-                self.miniflag=True
-            else:
-                self.miniflag=False
             self.split=True
         else:
             print "already split!"
 
     #initialize a model with a custom name
-    def init_model(self,strdict,metric,thresh=0.5):
+    def init_model(self,strdict,metric,dsnum,thresh=0.5):
         modstring=strdict.keys()[0]
         if modstring not in self.models.keys():
             self.models[modstring]\
                 =ClassificationModel(self.moddict[strdict[modstring]]
                                      ,metric
+                                     ,dsnum
                                      ,thresh=thresh)
         else:
             print "model already exists!"
 
     #check if model exists
-    def train_test(self,modstring,params=None,thresh=0.5,mini=False):
+    def train_test(self,modstring,params=None,thresh=0.5):
         #doesn't exist yet
         if self.split is False:
             self.separate()
         if modstring not in self.models.keys():
             print "must initialize model first!"
         else:
-            if mini is False:
-                self.models[modstring].fit(self.x_train
-                                           ,self.y_train
-                                           ,params=params
-                                           ,testflag=True)
-            elif self.miniflag is True:
-                self.models[modstring].fit(self.x_train_mini
-                                           ,self.y_train_mini
-                                           ,params=params
-                                           ,testflag=True)
-            else:
-                print "test size too large to do mini test"
+            self.models[modstring].fit(self.x_train
+                                       ,self.y_train
+                                       ,params=params
+                                       ,testflag=True)
             self.models[modstring].predict(self.x_test
                                            ,self.y_test)           
 

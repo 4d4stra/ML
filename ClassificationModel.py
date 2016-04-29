@@ -27,10 +27,11 @@ def negative_lr(true,pred):
         return float('inf')
     
 class ClassificationModel:
-    def __init__(self,modfunc,metric,thresh=0.5):
+    def __init__(self,modfunc,metric,dsnum,thresh=0.5):
         self.default_params=modfunc.get_params()
         self.model=modfunc
         self.metric=metric
+        self.dataset=dsnum#which dataset to use
         self.current={'params' : None
                       ,'predictions': None
                       , 'score' : None
