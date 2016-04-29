@@ -21,16 +21,23 @@ class ClassificationDataset:
         self.x_test=None
         self.preprocessing=preprocessing
         if type(data) is list:
-            self.data=list()
-            for i in range(data):
-                if i is 0:
-                    self.target=data[0]['target']
-                try:
-                    data[i]=data.drop('target',axis=1)
-                self.data.append(data[i])
+            #data and test data length must match
+            if len(data) is not len(testdata):
+                print "train and test data do not match in size"
+            else:
+                self.data=list()
+                self.data_nvers=len(data)
+                for i in range(self.data_nvers):
+                    if i is 0:
+                        self.target=data[0]['target']
+                    try:
+                        data[i]=data.drop('target',axis=1)
+                    self.data.append(data[i])
         else:
             self.target=data['target']
-            self.data=data.drop('target',axis=1)
+            self.data=list()
+            self.data.append(data.drop('target',axis=1))
+            self.data_nvers=1
         self.data_test=testdata
         self.description="A dataset class, to streamline the fitting process"
         self.author="Shawn Roberts"
@@ -76,11 +83,11 @@ class ClassificationDataset:
         self.x_test=None     
     
     #normalization
-    def normalize(self,replace=False):
+    def normalize(self,datanum,replace=False):
         if self.normed is False:
-            data_stacked=sknormalize(self.data+self.data_test)
-            self.data=data_stacked[:len(self.data)]
-            self.data_test=data_stacked[len(self.data):]
+            data_stacked=sknormalize(self.data[datanum]+self.data_test[datanum])
+            self.data[datanum]=data_stacked[:len(self.data[datanum])]
+            self.data_test[datanum]=data_stacked[len(self.data[datanum]):]
             data_stacked=None
             self.normed=True
             #reset models
@@ -89,26 +96,42 @@ class ClassificationDataset:
             print "already normalized!"
 
     #dimensionality reduction with PCA
-    def PCA(self,n_components=None,replace=False):
+    def PCA(self,datanum,n_components=None,replace=False):
         if self.reduced is False:
             if self.normed is False:
                 self.normalize()
             else:
                 self.flush()
             pca=PCA(n_components=n_components)
-            self.data=pca.fit_transform(self.data,self.target)
-            self.data_test=pca.transform(self.data_test)
+            self.data[datanum]=pca.fit_transform(self.data[datanum],self.target)
+            self.data_test[datanum]=pca.transform(self.data_test[datanum])
         else:
             print "already reduced with PCA"
 
     #split train-test
     def separate(self,test_size=0.3,random_state=1):
         if self.split is False:
-            self.y_train, self.y_test, self.x_train, self.x_test\
-                = train_test_split(self.target
-                                   , self.data
-                                   , test_size=test_size
-                                   , random_state=random_state)
+            if type(self.data) is list:
+                self.y_train=list()
+                self.y_test=list()
+                self.x_train=list()
+                self.x_test=list()
+                for i in range(self.data_nvers):
+                    y_train_i, y_test_i, x_train_i, x_test_i\
+                        = train_test_split(self.target
+                                           , self.data[i]
+                                           , test_size=test_size
+                                           , random_state=random_state)
+                    self.y_train.append(y_train_i)
+                    self.y_test.append(y_test_i)
+                    self.x_train.append(x_train_i)
+                    self.x_test.append(x_test_i)     
+            else:
+                self.y_train, self.y_test, self.x_train, self.x_test\
+                    = train_test_split(self.target
+                                       , self.data
+                                       , test_size=test_size
+                                       , random_state=random_state)
             self.split=True
         else:
             print "already split!"
@@ -133,21 +156,21 @@ class ClassificationDataset:
         if modstring not in self.models.keys():
             print "must initialize model first!"
         else:
-            self.models[modstring].fit(self.x_train
-                                       ,self.y_train
+            self.models[modstring].fit(self.x_train[self.models[modstring].dataset]
+                                       ,self.y_train[self.models[modstring].dataset]
                                        ,params=params
                                        ,testflag=True)
-            self.models[modstring].predict(self.x_test
-                                           ,self.y_test)           
+            self.models[modstring].predict(self.x_test[self.models[modstring].dataset]
+                                           ,self.y_test[self.models[modstring].dataset])           
 
 
     #train on the full dataset
-    def train_full(self,modstring, metric='accuracy'):
+    def train_full(self,modstring):
         if modstring in self.models.keys():
-            self.models[modstring].fit(self.data
+            self.models[modstring].fit(self.data[self.models[modstring].dataset]
                                        ,self.target
                                        ,testflag=False)
-            return self.models[modstring].predict(self.data_test) 
+            return self.models[modstring].predict(self.data_test[self.models[modstring].dataset]) 
         else:
             "Error: model has not been tested yet!"
 
@@ -208,7 +231,9 @@ class ClassificationDataset:
 
     
     #ensemble method# fit the optimal combination of each model
-    def ensemble(self,method=None,metric='accuracy',n_neighbors=50,test=True,params=None):
+    #dsnum only applies to local fitting and should be chosen with care
+    #it should only refer to a dataset that is normalized in some way
+    def ensemble(self,method=None,metric='accuracy',n_neighbors=50,test=True,params=None,dsnum=0):
         #initialize new model; the ensemble model; internal to this class
         self.ensemble['models']=self.models.keys()
         self.ensemble['metric']=metric
@@ -250,18 +275,18 @@ class ClassificationDataset:
             #so we can locate the nearest, and then find the local logloss,
             #and smooth by n_neighbors
             kernmodel=KNeighborsClassifier(n_neighbors=n_neighbors,p=2)
-            kernmodel.fit(self.x_test,self.y_test)
+            kernmodel.fit(self.x_test[dsnum],self.y_test[dsnum])
             #now we have our tree to locate neighbors
             #now, we want to iterate through the particles and find their local
             #logloss and determine which model to use
             if test is True:
-                best_preds_test=np.zeros(len(self.y_test))
+                best_preds_test=np.zeros(len(self.y_test[dsnum]))
                 #for test set
-                for i in range(len(self.y_test)):
+                for i in range(len(self.y_test[0])):
                     minlogloss=1.e7
-                    neighbs=kernmodel.kneighbors(self.x_test.iloc[i].reshape(1,-1))[1][0][1:]#throw out the actual observation
+                    neighbs=kernmodel.kneighbors(self.x_test[dsnum].iloc[i].reshape(1,-1))[1][0][1:]#throw out the actual observation
                     for key in self.models.keys():
-                        logloss_loc=logloss(self.y_test.iloc[neighbs],self.models[key].best['predictions'][neighbs])
+                        logloss_loc=logloss(self.y_test[self.models[modstring].dataset].iloc[neighbs],self.models[key].best['predictions'][neighbs])
                         if logloss_loc<minlogloss:
                             minlogloss=logloss_loc
                             best_preds_test[i]=self.models[key].best['predictions'][i]
@@ -271,13 +296,13 @@ class ClassificationDataset:
                 #predicting for each model
                 prediction_dict={}
                 for key in self.models.keys():
-                    prediction_dict[key]=self.models[key].predict(self.data_test)
-                best_preds_local=np.zeros(len(self.data_test))
-                for i in range(len(self.data_test)):
+                    prediction_dict[key]=self.models[key].predict(self.data_test[self.models[key].dataset])
+                best_preds_local=np.zeros(len(self.data_test[0]))
+                for i in range(len(self.data_test[0])):
                     minlogloss=1.e7
-                    neighbs=kernmodel.kneighbors(self.data_test.iloc[i].reshape(1,-1))[1][0]
+                    neighbs=kernmodel.kneighbors(self.data_test[dsnum].iloc[i].reshape(1,-1))[1][0]
                     for key in self.models.keys():
-                        logloss_loc=logloss(self.y_test.iloc[neighbs],self.models[key].best['predictions'][neighbs])
+                        logloss_loc=logloss(self.y_test[self.models[modstring].dataset].iloc[neighbs],self.models[key].best['predictions'][neighbs])
                         if logloss_loc<minlogloss:
                             minlogloss=logloss_loc
                             best_preds_local[i]=prediction_dict[key][i]
@@ -285,17 +310,17 @@ class ClassificationDataset:
         #averaging based on the local logloss score
         elif method is "local_average":
             kernmodel=KNeighborsClassifier(n_neighbors=n_neighbors,p=2)
-            kernmodel.fit(self.x_test,self.y_test)
+            kernmodel.fit(self.x_test[dsnum],self.y_test[dsnum])
             if test is True:
-                best_preds_test=np.zeros(len(self.y_test))
+                best_preds_test=np.zeros(len(self.y_test[dsnum]))
                 #for test set
                 logloss_i=np.zeros(len(self.models.keys()))
                 preds_i=np.zeros(len(logloss_i))
-                for i in range(len(self.y_test)):
-                    neighbs=kernmodel.kneighbors(self.x_test.iloc[i].reshape(1,-1))[1][0][1:]#throw out the actual observation
+                for i in range(len(self.y_test[dsnum])):
+                    neighbs=kernmodel.kneighbors(self.x_test[dsnum].iloc[i].reshape(1,-1))[1][0][1:]#throw out the actual observation
                     counter=0
                     for key in self.models.keys():
-                        logloss_i[counter]=logloss(self.y_test.iloc[neighbs],self.models[key].best_logloss['predictions'][neighbs])
+                        logloss_i[counter]=logloss(self.y_test[dsnum].iloc[neighbs],self.models[key].best_logloss['predictions'][neighbs])
                         preds_i[counter]=self.models[key].best['predictions'][i]
                         counter+=1
                     logloss_i=np.exp(-logloss_i)
@@ -310,9 +335,9 @@ class ClassificationDataset:
             counter=0
             for key in self.models.keys():
                 for train_index,test_index in folds:
-                    self.models[key].fit(self.data.iloc[train_index]
+                    self.models[key].fit(self.data[self.models[modstring].dataset].iloc[train_index]
                                                ,self.target.iloc[train_index])
-                    cv_preds[counter,test_index]=self.models[key].predict(self.data.iloc[test_index])
+                    cv_preds[counter,test_index]=self.models[key].predict(self.data[self.models[modstring].dataset].iloc[test_index])
                 counter+=1
             #now we split the predictions and train/test them
             cv_preds=np.transpose(cv_preds)
@@ -322,7 +347,7 @@ class ClassificationDataset:
                                    , test_size=0.3
                                    , random_state=1)
             #create a new model instance
-            model_int=ClassificationModel(self.moddict[method]
+            model_int=ClassificationModel(self.moddict[method],metric,-1
                                           ,thresh=0.5)
             model_int.fit(x_train_int
                           ,y_train_int
@@ -330,9 +355,10 @@ class ClassificationDataset:
                           ,testflag=True)
             model_int.predict(x_test_int
                               ,y_test_int)
+            self.ensemble['predictions']=model_int.best['predictions']
         if test is True:
             try:
-                self.ensemble['score']= self.metricdict[metric]['func'](np.array(self.y_test),self.ensemble['predictions'])
+                self.ensemble['score']= self.metricdict[metric]['func'](np.array(self.y_test[0]),self.ensemble['predictions'])
                 print "score: ",self.ensemble['score']
             except:
                 print "Unkown Method"
@@ -341,18 +367,18 @@ class ClassificationDataset:
     #add the model as an input; prediction with separate models and K-fold CV
     def model_as_input(self,modstring):
         #modelled predictions for withheld test set
-        cv_preds=np.zeros(len(self.data))
+        cv_preds=np.zeros(len(self.data[0]))
         #splitting in 3 fold set
-        folds=KFold(len(self.data))
+        folds=KFold(len(self.data[0]))
         #getting model parameters
         params=self.models[modstring].best['params']
         #iterating through splits and predicting
         for train_index,test_index in folds:
-            self.models[modstring].fit(self.data.iloc[train_index]
+            self.models[modstring].fit(self.data[self.models[modstring].dataset].iloc[train_index]
                                        ,self.target.iloc[train_index]
                                        ,params=params
                                        ,testflag=True)
-            cv_preds[test_index]=self.models[modstring].predict(self.data.iloc[test_index])
+            cv_preds[test_index]=self.models[modstring].predict(self.data[self.models[modstring].dataset].iloc[test_index])
         #Now we add to the data and clear stored stuff
         self.data[modstring]=cv_preds
         self.flush()
