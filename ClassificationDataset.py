@@ -8,6 +8,7 @@ from sklearn.linear_model import SGDClassifier,LogisticRegression
 from sklearn.svm import SVC
 from ClassificationModel import *
 import matplotlib.pyplot as plt
+from sklearn.metrics import *
 
 class ClassificationDataset:
     def __init__(self,data,testdata,preprocessing=None,normed=False,reduced=False):
@@ -26,6 +27,7 @@ class ClassificationDataset:
         self.description="A dataset class, to streamline the fitting process"
         self.author="Shawn Roberts"
         self.models={}
+        self.ensemble={}
         self.moddescriptions={"RF" : "Random Forest Classifier"
                       ,"KNN" : "K-Nearest Neighbors"
                       ,"ET" : "Extra Trees"
@@ -42,6 +44,15 @@ class ClassificationDataset:
                       ,'Ada' : AdaBoostClassifier()
                       ,'GBC' : GradientBoostingClassifier()
                       ,'SVC' : SVC()}
+        self.metricdict={"logloss": {'func': logloss
+                                     ,'incflag' : -1.
+                                     ,'binflag' : False},
+                         "accuracy": {'func': accuracy_score
+                                      ,'incflag':1.
+                                      ,'binflag' : True},
+                         "F1": {'func':f1_score
+                                ,'incflag': 1.
+                                ,'binflag' : True}}
 
     #return available models
     def get_available_models(self):
@@ -205,21 +216,29 @@ class ClassificationDataset:
 
     
     #ensemble method# fit the optimal combination of each model
-    def ensemble(self,method=None,n_neighbors=50,test=True,params=None):
+    def ensemble(self,method=None,metric='accuracy',n_neighbors=50,test=True,params=None):
+        #initialize new model; the ensemble model; internal to this class
+        self.ensemble['models']=self.models.keys()
+        self.ensemble['metric']=metric
+        self.ensemble['method']=method
+        
         stacked_preds=np.zeros((len(self.models.keys()),len(self.y_test)))
+        #weighting is done by the logloss score
         weights=np.ones(np.shape(stacked_preds))
         counter=0
         for key in self.models.keys():
             stacked_preds[counter]=self.models[key].best['predictions']
-            weights[counter]=self.models[key].best['score']
+            weights[counter]=self.models[key].best['llscore']
             counter+=1
         weights=np.exp(-weights)
-        if method is None or method is 'average':#averaging
-            return logloss(np.array(self.y_test),np.mean(stacked_preds,axis=0))
+        #model averaging
+        if method is None or method is 'average':
+            self.ensemble['predictions']=np.mean(stacked_preds,axis=0)
+        #weighting average by the logloss score
         elif method is "weighted_average":
-            return logloss(np.array(self.y_test)
-                           ,np.average(stacked_preds,axis=0,weights=weights))
-        elif method is 'voted_average':#vote and then average
+            self.ensemble['predictions']=np.mean(stacked_preds,axis=0,weights=weights)
+        #vote and then average majority vote
+        elif method is 'voted_average':
             votebool=stacked_preds>0.5
             votefrac=np.sum(votebool,axis=0)/float(len(weights))
             votedpreds=np.zeros(len(stacked_preds[0]))+0.5#if equal vote, then 0.5
@@ -231,7 +250,7 @@ class ClassificationDataset:
             weighted[votebool]=1.e-7
             votedpreds[votefrac<0.5]=np.average(stacked_preds,axis=0
                                                 ,weights=weighted)[votefrac<0.5]
-            return logloss(np.array(self.y_test),votedpreds)
+            self.ensemble['predictions']=votedpreds
         elif method is 'local':
             #print ClassifyDS.models['KNN'].model.kneighbors(ClassifyDS.x_test.iloc[11911].reshape(1,-1))[1][0]
             #print ClassifyDS.models['RF'].best_logloss['predictions'][neighbs]
@@ -250,31 +269,28 @@ class ClassificationDataset:
                     minlogloss=1.e7
                     neighbs=kernmodel.kneighbors(self.x_test.iloc[i].reshape(1,-1))[1][0][1:]#throw out the actual observation
                     for key in self.models.keys():
-                        logloss_loc=logloss(self.y_test.iloc[neighbs],self.models[key].best_logloss['predictions'][neighbs])
+                        logloss_loc=logloss(self.y_test.iloc[neighbs],self.models[key].best['predictions'][neighbs])
                         if logloss_loc<minlogloss:
                             minlogloss=logloss_loc
-                            best_preds_test[i]=self.models[key].best_logloss['predictions'][i]
-                return logloss(np.array(self.y_test),best_preds_test)
-
+                            best_preds_test[i]=self.models[key].best['predictions'][i]
+                self.ensemble['predictions']=best_preds_test
+            #running through the test data
             else:
                 #predicting for each model
                 prediction_dict={}
                 for key in self.models.keys():
                     prediction_dict[key]=self.models[key].predict(self.data_test)
-                print prediction_dict.keys()
-                print prediction_dict['RF']
-                print len(self.models['RF'].current['predictions'])
-                print len(self.models['RF'].best_logloss['predictions'])
                 best_preds_local=np.zeros(len(self.data_test))
                 for i in range(len(self.data_test)):
                     minlogloss=1.e7
                     neighbs=kernmodel.kneighbors(self.data_test.iloc[i].reshape(1,-1))[1][0]
                     for key in self.models.keys():
-                        logloss_loc=logloss(self.y_test.iloc[neighbs],self.models[key].best_logloss['predictions'][neighbs])
+                        logloss_loc=logloss(self.y_test.iloc[neighbs],self.models[key].best['predictions'][neighbs])
                         if logloss_loc<minlogloss:
                             minlogloss=logloss_loc
                             best_preds_local[i]=prediction_dict[key][i]
-                return best_preds_local
+                self.ensemble['predictions']=best_preds_local
+        #averaging based on the local logloss score
         elif method is "local_average":
             kernmodel=KNeighborsClassifier(n_neighbors=n_neighbors,p=2)
             kernmodel.fit(self.x_test,self.y_test)
@@ -288,11 +304,11 @@ class ClassificationDataset:
                     counter=0
                     for key in self.models.keys():
                         logloss_i[counter]=logloss(self.y_test.iloc[neighbs],self.models[key].best_logloss['predictions'][neighbs])
-                        preds_i[counter]=self.models[key].best_logloss['predictions'][i]
+                        preds_i[counter]=self.models[key].best['predictions'][i]
                         counter+=1
                     logloss_i=np.exp(-logloss_i)
                     best_preds_test[i]=np.average(preds_i,weights=logloss_i)
-                return logloss(np.array(self.y_test),best_preds_test)
+                self.ensemble['predictions']=best_preds_test
         elif method in self.moddict.keys():#stack results and throw to a new model
             #modelled predictions for withheld test set
             cv_preds=np.zeros((len(self.models.keys()),len(self.data)))
@@ -303,8 +319,7 @@ class ClassificationDataset:
             for key in self.models.keys():
                 for train_index,test_index in folds:
                     self.models[key].fit(self.data.iloc[train_index]
-                                               ,self.target.iloc[train_index]
-                                               ,metric='logloss')
+                                               ,self.target.iloc[train_index])
                     cv_preds[counter,test_index]=self.models[key].predict(self.data.iloc[test_index])
                 counter+=1
             #now we split the predictions and train/test them
@@ -322,9 +337,13 @@ class ClassificationDataset:
                           ,params=params
                           ,testflag=True)
             model_int.predict(x_test_int
-                              ,y_test_int)   
-        else:
-            print "Unknown method."
+                              ,y_test_int)
+        if test is True:
+            try:
+                self.ensemble['score']= self.metricdict[metric]['func'](np.array(self.y_test),self.ensemble['predictions'])
+                print "score: ",self.ensemble['score']
+            except:
+                print "Unkown Method"
 
 
     #add the model as an input; prediction with separate models and K-fold CV

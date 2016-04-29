@@ -33,10 +33,12 @@ class ClassificationModel:
         self.metric=metric
         self.current={'params' : None
                       ,'predictions': None
-                      , 'score' : None}
+                      , 'score' : None
+                      , 'llscore' : None}
         self.best={'params' : None
                            , 'predictions': None
-                           , 'score' : None}
+                           , 'score' : None
+                   , 'llscore' : None}
         self.thresh=thresh
         self.description="A classification model, for use with ClassificationDataset"
         self.metricdict={"logloss": {'func': logloss
@@ -76,16 +78,18 @@ class ClassificationModel:
             if self.metricdict[self.metric]['binflag'] is True:
                 pred_bin=(pred+0.5).astype(int)
                 self.current['score']=self.metricdict[self.metric]['func'](y,pred_bin)
+                self.current['llscore']=self.metricdict['logloss']['func'](y,pred_bin)                
             else:
                 self.current['score']=self.metricdict[self.metric]['func'](y,pred)
+                self.current['llscore']=self.metricdict['logloss']['func'](y,pred)
             print self.metric+" score: ",self.current['score']
             #updating best values
-            #logloss score
             if (self.best['score'] is None) or ((self.current['score']-self.best['score'])\
                *self.metricdict[self.metric]['incflag']>0.):
                 self.best['score']=self.current['score']
                 self.best['predictions']=self.current['predictions']
                 self.best['params']=self.current['params']
+                self.best['llscore']=self.current['llscore']
                 print "new best "+self.metric+"!"
             else:
                 print "current best "+self.metric+": ",self.best['score']
