@@ -79,7 +79,7 @@ class ClassificationModel:
             if self.metricdict[self.metric]['binflag'] is True:
                 pred_bin=(pred+0.5).astype(int)
                 self.current['score']=self.metricdict[self.metric]['func'](y,pred_bin)
-                self.current['llscore']=self.metricdict['logloss']['func'](y,pred_bin)                
+                self.current['llscore']=self.metricdict['logloss']['func'](y,pred)                
             else:
                 self.current['score']=self.metricdict[self.metric]['func'](y,pred)
                 self.current['llscore']=self.metricdict['logloss']['func'](y,pred)

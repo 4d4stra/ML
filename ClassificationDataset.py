@@ -31,7 +31,9 @@ class ClassificationDataset:
                     if i is 0:
                         self.target=data[0]['target']
                     try:
-                        data[i]=data.drop('target',axis=1)
+                        data[i]=data[i].drop('target',axis=1)
+                    except:
+                        print "no target for set ",i
                     self.data.append(data[i])
         else:
             self.target=data['target']
@@ -217,17 +219,17 @@ class ClassificationDataset:
     #getting all true positives predictions
     def get_ones(self,model,current=False):
         if current is True:#use current
-            return self.models[model].current['predictions'][np.array(self.y_test)==1]
+            return self.models[model].current['predictions'][np.array(self.y_test[self.models[model].dataset])==1]
         else:
-            return self.models[model].best['predictions'][np.array(self.y_test)==1]
+            return self.models[model].best['predictions'][np.array(self.y_test[self.models[model].dataset])==1]
 
         
     #getting all genuine negatives predictions
     def get_zeros(self,model,current=False):
         if current is True:#use current
-            return self.models[model].current['predictions'][np.array(self.y_test)==0]
+            return self.models[model].current['predictions'][np.array(self.y_test[self.models[model].dataset])==0]
         else:
-            return self.models[model].best['predictions'][np.array(self.y_test)==0]
+            return self.models[model].best['predictions'][np.array(self.y_test[self.models[model].dataset])==0]
 
     
     #ensemble method# fit the optimal combination of each model
