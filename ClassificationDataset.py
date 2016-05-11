@@ -44,7 +44,7 @@ class ClassificationDataset:
         self.description="A dataset class, to streamline the fitting process"
         self.author="Shawn Roberts"
         self.models={}
-        self.ensemble={}
+        self.ensemble_mod={}
         self.moddescriptions={"RF" : "Random Forest Classifier"
                       ,"KNN" : "K-Nearest Neighbors"
                       ,"ET" : "Extra Trees"
@@ -237,11 +237,11 @@ class ClassificationDataset:
     #it should only refer to a dataset that is normalized in some way
     def ensemble(self,method=None,metric='accuracy',n_neighbors=50,test=True,params=None,dsnum=0):
         #initialize new model; the ensemble model; internal to this class
-        self.ensemble['models']=self.models.keys()
-        self.ensemble['metric']=metric
-        self.ensemble['method']=method
+        self.ensemble_mod['models']=self.models.keys()
+        self.ensemble_mod['metric']=metric
+        self.ensemble_mod['method']=method
         
-        stacked_preds=np.zeros((len(self.models.keys()),len(self.y_test)))
+        stacked_preds=np.zeros((len(self.models.keys()),len(self.y_test[0])))
         #weighting is done by the logloss score
         weights=np.ones(np.shape(stacked_preds))
         counter=0
@@ -252,10 +252,10 @@ class ClassificationDataset:
         weights=np.exp(-weights)
         #model averaging
         if method is None or method is 'average':
-            self.ensemble['predictions']=np.mean(stacked_preds,axis=0)
+            self.ensemble_mod['predictions']=np.mean(stacked_preds,axis=0)
         #weighting average by the logloss score
         elif method is "weighted_average":
-            self.ensemble['predictions']=np.mean(stacked_preds,axis=0,weights=weights)
+            self.ensemble_mod['predictions']=np.average(stacked_preds,axis=0,weights=weights)
         #vote and then average majority vote
         elif method is 'voted_average':
             votebool=stacked_preds>0.5
@@ -269,7 +269,7 @@ class ClassificationDataset:
             weighted[votebool]=1.e-7
             votedpreds[votefrac<0.5]=np.average(stacked_preds,axis=0
                                                 ,weights=weighted)[votefrac<0.5]
-            self.ensemble['predictions']=votedpreds
+            self.ensemble_mod['predictions']=votedpreds
         elif method is 'local':
             #print ClassifyDS.models['KNN'].model.kneighbors(ClassifyDS.x_test.iloc[11911].reshape(1,-1))[1][0]
             #print ClassifyDS.models['RF'].best_logloss['predictions'][neighbs]
@@ -288,11 +288,11 @@ class ClassificationDataset:
                     minlogloss=1.e7
                     neighbs=kernmodel.kneighbors(self.x_test[dsnum].iloc[i].reshape(1,-1))[1][0][1:]#throw out the actual observation
                     for key in self.models.keys():
-                        logloss_loc=logloss(self.y_test[self.models[modstring].dataset].iloc[neighbs],self.models[key].best['predictions'][neighbs])
+                        logloss_loc=logloss(self.y_test[self.models[key].dataset].iloc[neighbs],self.models[key].best['predictions'][neighbs])
                         if logloss_loc<minlogloss:
                             minlogloss=logloss_loc
                             best_preds_test[i]=self.models[key].best['predictions'][i]
-                self.ensemble['predictions']=best_preds_test
+                self.ensemble_mod['predictions']=best_preds_test
             #running through the test data
             else:
                 #predicting for each model
@@ -304,11 +304,11 @@ class ClassificationDataset:
                     minlogloss=1.e7
                     neighbs=kernmodel.kneighbors(self.data_test[dsnum].iloc[i].reshape(1,-1))[1][0]
                     for key in self.models.keys():
-                        logloss_loc=logloss(self.y_test[self.models[modstring].dataset].iloc[neighbs],self.models[key].best['predictions'][neighbs])
+                        logloss_loc=logloss(self.y_test[self.models[key].dataset].iloc[neighbs],self.models[key].best['predictions'][neighbs])
                         if logloss_loc<minlogloss:
                             minlogloss=logloss_loc
                             best_preds_local[i]=prediction_dict[key][i]
-                self.ensemble['predictions']=best_preds_local
+                self.ensemble_mod['predictions']=best_preds_local
         #averaging based on the local logloss score
         elif method is "local_average":
             kernmodel=KNeighborsClassifier(n_neighbors=n_neighbors,p=2)
@@ -322,24 +322,24 @@ class ClassificationDataset:
                     neighbs=kernmodel.kneighbors(self.x_test[dsnum].iloc[i].reshape(1,-1))[1][0][1:]#throw out the actual observation
                     counter=0
                     for key in self.models.keys():
-                        logloss_i[counter]=logloss(self.y_test[dsnum].iloc[neighbs],self.models[key].best_logloss['predictions'][neighbs])
+                        logloss_i[counter]=logloss(self.y_test[dsnum].iloc[neighbs],self.models[key].best['predictions'][neighbs])
                         preds_i[counter]=self.models[key].best['predictions'][i]
                         counter+=1
                     logloss_i=np.exp(-logloss_i)
                     best_preds_test[i]=np.average(preds_i,weights=logloss_i)
-                self.ensemble['predictions']=best_preds_test
+                self.ensemble_mod['predictions']=best_preds_test
         elif method in self.moddict.keys():#stack results and throw to a new model
             #modelled predictions for withheld test set
-            cv_preds=np.zeros((len(self.models.keys()),len(self.data)))
+            cv_preds=np.zeros((len(self.models.keys()),len(self.data[0])))
             #splitting in 3 fold set
             #and training each model
-            folds=KFold(len(self.data))
+            folds=KFold(len(self.data[0]))
             counter=0
             for key in self.models.keys():
                 for train_index,test_index in folds:
-                    self.models[key].fit(self.data[self.models[modstring].dataset].iloc[train_index]
+                    self.models[key].fit(self.data[self.models[key].dataset].iloc[train_index]
                                                ,self.target.iloc[train_index])
-                    cv_preds[counter,test_index]=self.models[key].predict(self.data[self.models[modstring].dataset].iloc[test_index])
+                    cv_preds[counter,test_index]=self.models[key].predict(self.data[self.models[key].dataset].iloc[test_index])
                 counter+=1
             #now we split the predictions and train/test them
             cv_preds=np.transpose(cv_preds)
@@ -357,11 +357,15 @@ class ClassificationDataset:
                           ,testflag=True)
             model_int.predict(x_test_int
                               ,y_test_int)
-            self.ensemble['predictions']=model_int.best['predictions']
+            self.ensemble_mod['predictions']=model_int.best['predictions']
         if test is True:
             try:
-                self.ensemble['score']= self.metricdict[metric]['func'](np.array(self.y_test[0]),self.ensemble['predictions'])
-                print "score: ",self.ensemble['score']
+                pred_bin=(self.ensemble_mod['predictions']+0.5).astype(int)
+                if self.metricdict[metric]['binflag'] is True:
+                    self.ensemble_mod['score']= self.metricdict[metric]['func'](np.array(self.y_test[0]),pred_bin)
+                else:
+                    self.ensemble_mod['score']= self.metricdict[metric]['func'](np.array(self.y_test[0]),self.ensemble_mod['predictions'])
+                print "score: ",self.ensemble_mod['score']
             except:
                 print "Unkown Method"
 
